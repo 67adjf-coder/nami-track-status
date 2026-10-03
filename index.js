@@ -287,8 +287,8 @@ _ _`;
 `_ _
            \` 、 \`     **reseller    points**    
 ~~                                                                        ~~
-⌒⌒   \({interaction.user}   <:hearty:1554781762813558804>\){itemBought}
-⌒⌒   \({pricePaid}  <:hearty:1554781762813558804>\){vouchFormatted}
+⌒⌒   \ ${interaction.user}   <:hearty:1554781762813558804>\ ${itemBought}
+⌒⌒   \ ${pricePaid}  <:hearty:1554781762813558804>\ [vouch link](${vouchFormatted})
 <:zz_blueheart3:1555584821529546752>  \` current pts \`     ꐚ     __**${newTotalPoints}**__
 ~~                                                                        ~~`;
 
