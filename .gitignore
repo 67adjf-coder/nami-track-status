@@ -1,0 +1,4 @@
+node_modules/
+.env
+points.db
+points.db-journal
