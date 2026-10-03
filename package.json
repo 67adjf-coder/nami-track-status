@@ -1,0 +1,16 @@
+{
+  "name": "coastal-cart-bot",
+  "version": "1.0.0",
+  "description": "Discord Shop Bot with Incentives, Points Tracking, and Shop Status Commands",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3"
+  }
+}
