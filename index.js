@@ -10,7 +10,7 @@ const {
     TextInputStyle, 
     ActionRowBuilder 
 } = require('discord.js');
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const cron = require('node-cron');
 const express = require('express');
 require('dotenv').config();
@@ -30,15 +30,47 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // -------------------------------------------------------------
-// 2. DATABASE SETUP FOR POINTS TRACKER
+// 2. DATABASE SETUP FOR POINTS TRACKER (sqlite3)
 // -------------------------------------------------------------
-const db = new Database('points.db');
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS user_points (
-        user_id TEXT PRIMARY KEY,
-        points INTEGER DEFAULT 0
-    )
-`).run();
+const db = new sqlite3.Database('points.db');
+
+db.serialize(() => {
+    db.run(`
+        CREATE TABLE IF NOT EXISTS user_points (
+            user_id TEXT PRIMARY KEY,
+            points INTEGER DEFAULT 0
+        )
+    `);
+});
+
+// Helper database functions using Promises
+function getUserPoints(userId) {
+    return new Promise((resolve, reject) => {
+        db.get('SELECT points FROM user_points WHERE user_id = ?', [userId], (err, row) => {
+            if (err) return reject(err);
+            resolve(row ? row.points : 0);
+        });
+    });
+}
+
+function addPoints(userId, amount) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const current = await getUserPoints(userId);
+            const newTotal = current + amount;
+            db.run(
+                'INSERT INTO user_points (user_id, points) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET points = ?',
+                [userId, newTotal, newTotal],
+                (err) => {
+                    if (err) return reject(err);
+                    resolve(newTotal);
+                }
+            );
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
 
 // -------------------------------------------------------------
 // 3. CONSTANTS & CONFIGURATION
@@ -48,7 +80,6 @@ const RS_ROLE_ID = '1522171090888163328';
 const STAFF_ROLE_ID = '1533372358755221566';
 const TARGET_CHANNEL_ID = '1555770267706466364';
 
-// Helper to format GMT+8 date string
 function getGMT8Timestamp() {
     return new Date().toLocaleString('en-US', {
         timeZone: 'Asia/Singapore',
@@ -62,7 +93,6 @@ function getGMT8Timestamp() {
     }) + ' (GMT+8)';
 }
 
-// Helper to calculate points based on price paid and vouch link
 function calculatePoints(priceText, vouchLinkText) {
     const match = priceText.replace(/,/g, '').match(/\d+(\.\d+)?/);
     const price = match ? parseFloat(match[0]) : 0;
@@ -80,24 +110,10 @@ function calculatePoints(priceText, vouchLinkText) {
     return { totalAdded, hasVouch };
 }
 
-// Database helper functions
-function getUserPoints(userId) {
-    const row = db.prepare('SELECT points FROM user_points WHERE user_id = ?').get(userId);
-    return row ? row.points : 0;
-}
-
-function addPoints(userId, amount) {
-    const current = getUserPoints(userId);
-    const newTotal = current + amount;
-    db.prepare('INSERT INTO user_points (user_id, points) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET points = ?')
-      .run(userId, newTotal, newTotal);
-    return newTotal;
-}
-
 // Monthly auto-reset on the 1st day of every month at midnight GMT+8
 cron.schedule('0 0 1 * *', () => {
     console.log('Resetting all points for the new month...');
-    db.prepare('DELETE FROM user_points').run();
+    db.run('DELETE FROM user_points');
 }, {
     timezone: 'Asia/Singapore'
 });
@@ -178,11 +194,9 @@ client.once('ready', async () => {
 // -------------------------------------------------------------
 client.on('interactionCreate', async (interaction) => {
 
-    // A. SLASH COMMAND HANDLERS
     if (interaction.isChatInputCommand()) {
         const { commandName, member } = interaction;
 
-        // 1. /incentives
         if (commandName === 'incentives') {
             if (!member.roles.cache.has(RS_ROLE_ID)) {
                 return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
@@ -219,7 +233,6 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.showModal(modal);
         }
 
-        // 2. /track-points
         if (commandName === 'track-points') {
             const hasRsRole = member.roles.cache.has(RS_ROLE_ID);
             const hasStaffRole = member.roles.cache.has(STAFF_ROLE_ID);
@@ -229,7 +242,7 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             const targetUser = interaction.options.getUser('user');
-            const totalPoints = getUserPoints(targetUser.id);
+            const totalPoints = await getUserPoints(targetUser.id);
 
             const description = 
 `_ _
@@ -246,7 +259,6 @@ _ _`;
             await interaction.reply({ embeds: [embed] });
         }
 
-        // 3. /status
         if (commandName === 'status') {
             const state = interaction.options.getString('state');
             const selectedLayout = state === 'open' ? OPEN_LAYOUT : CLOSED_LAYOUT;
@@ -256,7 +268,6 @@ _ _`;
         }
     }
 
-    // B. MODAL SUBMISSION HANDLER
     if (interaction.isModalSubmit()) {
         if (interaction.customId === 'incentives_modal') {
             const itemBought = interaction.fields.getTextInputValue('item_bought');
@@ -264,7 +275,7 @@ _ _`;
             const vouchLink = interaction.fields.getTextInputValue('vouch_link');
 
             const { totalAdded, hasVouch } = calculatePoints(pricePaid, vouchLink);
-            const newTotalPoints = addPoints(interaction.user.id, totalAdded);
+            const newTotalPoints = await addPoints(interaction.user.id, totalAdded);
 
             const vouchFormatted = (hasVouch && vouchLink.startsWith('http')) 
                 ? `[vouched](${vouchLink})` 
