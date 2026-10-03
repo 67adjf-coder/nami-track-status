@@ -138,6 +138,7 @@ const CLOSED_LAYOUT = `_ _
 -# _ _    <@&1533372358755221566>    will serve you tomorrow !
 ~~                                                                                                  ~~
                   <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
+                  
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
          <:hearty:1554781762813558804>    always vouch your items for warranty!
