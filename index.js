@@ -197,23 +197,11 @@ const commands = [
         ),
     new SlashCommandBuilder()
         .setName('say')
-        .setDescription('Send a pastel blue announcement embed to the channel')
+        .setDescription('Send a custom pastel blue message')
         .addStringOption(opt => 
-            opt.setName('title')
-               .setDescription('Title / Header (e.g. premium invites for resellies 🌸)')
+            opt.setName('message')
+               .setDescription('Type the text/announcement you want the bot to send')
                .setRequired(true))
-        .addStringOption(opt => 
-            opt.setName('prem_availed')
-               .setDescription('Prem Availed (e.g. 1m yt invite)')
-               .setRequired(true))
-        .addStringOption(opt => 
-            opt.setName('invite_status')
-               .setDescription('Invite Status details')
-               .setRequired(true))
-        .addStringOption(opt => 
-            opt.setName('availed_by')
-               .setDescription('Availed By (e.g. @rs ✿ yra)')
-               .setRequired(false))
 ].map(cmd => cmd.toJSON());
 
 client.once('ready', async () => {
@@ -232,33 +220,23 @@ client.once('ready', async () => {
 // -------------------------------------------------------------
 
 async function handleSayCommand(interaction) {
+    // 1. Staff Role Check
     if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
     }
 
-    const title = interaction.options.getString('title');
-    const premAvailed = interaction.options.getString('prem_availed');
-    const status = interaction.options.getString('invite_status');
-    const availedBy = interaction.options.getString('availed_by');
+    // 2. Get the single message option input
+    const userMessage = interaction.options.getString('message');
 
-    const formattedStatus = status
-        .split('\n')
-        .map(line => `🌸  ${line.trim()}`)
-        .join('\n');
-
-    let description = `**${title}**\n\n`;
-    if (availedBy && availedBy.trim() !== '') {
-        description += `▌  availed by: ${availedBy}\n\n`;
-    }
-    description += `**prem availed:**\n🌸  ${premAvailed}\n\n`;
-    description += `**invite status:**\n${formattedStatus}`;
-
+    // 3. Create embed with user's exact text
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
-        .setDescription(description);
+        .setDescription(userMessage);
 
+    // 4. Silently acknowledge interaction (hidden confirmation)
     await interaction.reply({ content: 'Message sent successfully!', ephemeral: true });
 
+    // 5. Send public message with role ping and embed
     await interaction.channel.send({
         content: `<@&${MEMBER_ROLE_ID}>`,
         embeds: [embed]
