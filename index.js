@@ -75,7 +75,7 @@ function addPoints(userId, amount) {
 function getTopPoints(limit = 10) {
     return new Promise((resolve, reject) => {
         db.all(
-            'SELECT user_id, points FROM user_points WHERE points > 0 ORDER BY points DESC LIMIT ?',
+            'SELECT user_id, points FROM user_points ORDER BY points DESC LIMIT ?',
             [limit],
             (err, rows) => {
                 if (err) return reject(err);
@@ -220,23 +220,18 @@ client.once('ready', async () => {
 // -------------------------------------------------------------
 
 async function handleSayCommand(interaction) {
-    // 1. Staff Role Check
     if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
     }
 
-    // 2. Get the single message option input
     const userMessage = interaction.options.getString('message');
 
-    // 3. Create embed with user's exact text
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
         .setDescription(userMessage);
 
-    // 4. Silently acknowledge interaction (hidden confirmation)
     await interaction.reply({ content: 'Message sent successfully!', ephemeral: true });
 
-    // 5. Send public message with role ping and embed
     await interaction.channel.send({
         content: `<@&${MEMBER_ROLE_ID}>`,
         embeds: [embed]
@@ -310,27 +305,31 @@ async function handlePointsRankCommand(interaction) {
     const hasStaffRole = interaction.member.roles.cache.has(STAFF_ROLE_ID);
 
     if (!hasRsRole && !hasStaffRole) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+        return interaction.reply({ 
+            content: 'You do not have permission to use this command.', 
+            ephemeral: true 
+        });
     }
 
     const topUsers = await getTopPoints(10);
 
     if (topUsers.length === 0) {
-        return interaction.reply({ content: 'No points recorded for this month yet.', ephemeral: true });
+        return interaction.reply({ 
+            content: 'No user points found in the database yet. Log some points using `/incentives` first!', 
+            ephemeral: true 
+        });
     }
 
-    const medals = ['🥇', '🥈', '🥉'];
-    let leaderboardText = topUsers.map((row, index) => {
-        const badge = medals[index] || `${index + 1}.`;
-        return `\({badge}  <@\){row.user_id}> — **${row.points}** pts`;
-    }).join('\n');
+    const formattedRanks = topUsers.map((row, index) => {
+        const rankNum = index + 1;
+        return `\` ⌗\({rankNum} \`  : <@\){row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
+    }).join('\n\n');
 
     const description = 
 `_ _
-           \` 、 \`     **points    leaderboard**    
-~~                                                                        ~~
-${leaderboardText}
-~~                                                                        ~~`;
+> <:links:1555857271446310923>  \` incentives rank \` 
+
+${formattedRanks}`;
 
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
@@ -364,8 +363,8 @@ async function handleIncentivesModal(interaction) {
 `_ _
            \` 、 \`     **reseller    points**    
 ~~                                                                        ~~
-⌒⌒   \ \({interaction.user}   <:hearty:1554781762813558804>\\){itemBought}
-⌒⌒   \ \({pricePaid}  <:hearty:1554781762813558804>\\){vouchFormatted}
+⌒⌒   \({interaction.user}   <:hearty:1554781762813558804>\){itemBought}
+⌒⌒   \({pricePaid}  <:hearty:1554781762813558804>\){vouchFormatted}
 <:zz_blueheart3:1555584821529546752>  \` current pts \`     ꐚ     __**${newTotalPoints}**__
 ~~                                                                        ~~`;
 
