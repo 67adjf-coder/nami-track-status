@@ -72,12 +72,26 @@ function addPoints(userId, amount) {
     });
 }
 
+function getTopPoints(limit = 10) {
+    return new Promise((resolve, reject) => {
+        db.all(
+            'SELECT user_id, points FROM user_points WHERE points > 0 ORDER BY points DESC LIMIT ?',
+            [limit],
+            (err, rows) => {
+                if (err) return reject(err);
+                resolve(rows || []);
+            }
+        );
+    });
+}
+
 // -------------------------------------------------------------
 // 3. CONSTANTS & CONFIGURATION
 // -------------------------------------------------------------
 const PASTEL_BLUE = 0xAEC6CF;
 const RS_ROLE_ID = '1522171090888163328';
 const STAFF_ROLE_ID = '1533372358755221566';
+const MEMBER_ROLE_ID = '1507222001972940861';
 const TARGET_CHANNEL_ID = '1555770267706466364';
 
 function getGMT8Timestamp() {
@@ -123,7 +137,7 @@ const OPEN_LAYOUT = `_ _
 #         [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( open ) ༄
 -# _ _    <@&1533372358755221566>    will be here to assist you !
 ~~                                                                                                  ~~
-                   <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
+                   <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
                    
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
@@ -138,7 +152,7 @@ const CLOSED_LAYOUT = `_ _
 #      [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( closed ) ༄
 -# _ _    <@&1533372358755221566>    will serve you tomorrow !
 ~~                                                                                                  ~~
-                  <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
+                  <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
                   
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
@@ -167,6 +181,9 @@ const commands = [
                 .setRequired(true)
         ),
     new SlashCommandBuilder()
+        .setName('points-rank')
+        .setDescription('View the top points leaderboard'),
+    new SlashCommandBuilder()
         .setName('status')
         .setDescription('Set shop status to open or closed')
         .addStringOption(option =>
@@ -177,7 +194,26 @@ const commands = [
                     { name: 'open', value: 'open' },
                     { name: 'closed', value: 'closed' }
                 )
-        )
+        ),
+    new SlashCommandBuilder()
+        .setName('say')
+        .setDescription('Send a pastel blue announcement embed to the channel')
+        .addStringOption(opt => 
+            opt.setName('title')
+               .setDescription('Title / Header (e.g. premium invites for resellies 🌸)')
+               .setRequired(true))
+        .addStringOption(opt => 
+            opt.setName('prem_availed')
+               .setDescription('Prem Availed (e.g. 1m yt invite)')
+               .setRequired(true))
+        .addStringOption(opt => 
+            opt.setName('invite_status')
+               .setDescription('Invite Status details')
+               .setRequired(true))
+        .addStringOption(opt => 
+            opt.setName('availed_by')
+               .setDescription('Availed By (e.g. @rs ✿ yra)')
+               .setRequired(false))
 ].map(cmd => cmd.toJSON());
 
 client.once('ready', async () => {
@@ -185,125 +221,214 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('All 3 slash commands registered globally!');
+        console.log('All 5 slash commands registered globally!');
     } catch (err) {
         console.error('Error registering commands:', err);
     }
 });
 
 // -------------------------------------------------------------
-// 5. INTERACTION ROUTER
+// 5. COMMAND HANDLERS
 // -------------------------------------------------------------
-client.on('interactionCreate', async (interaction) => {
 
-    if (interaction.isChatInputCommand()) {
-        const { commandName, member } = interaction;
+async function handleSayCommand(interaction) {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
+        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    }
 
-        if (commandName === 'incentives') {
-            if (!member.roles.cache.has(RS_ROLE_ID)) {
-                return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-            }
+    const title = interaction.options.getString('title');
+    const premAvailed = interaction.options.getString('prem_availed');
+    const status = interaction.options.getString('invite_status');
+    const availedBy = interaction.options.getString('availed_by');
 
-            const modal = new ModalBuilder()
-                .setCustomId('incentives_modal')
-                .setTitle('Incentives Entry');
+    const formattedStatus = status
+        .split('\n')
+        .map(line => `🌸  ${line.trim()}`)
+        .join('\n');
 
-            const itemInput = new TextInputBuilder()
-                .setCustomId('item_bought')
-                .setLabel('1. Item bought')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true);
+    let description = `**${title}**\n\n`;
+    if (availedBy && availedBy.trim() !== '') {
+        description += `▌  availed by: ${availedBy}\n\n`;
+    }
+    description += `**prem availed:**\n🌸  ${premAvailed}\n\n`;
+    description += `**invite status:**\n${formattedStatus}`;
 
-            const priceInput = new TextInputBuilder()
-                .setCustomId('price_paid')
-                .setLabel('2. Price paid (e.g. ₱200)')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true);
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(description);
 
-            const vouchInput = new TextInputBuilder()
-                .setCustomId('vouch_link')
-                .setLabel('3. Vouch link (leave blank if none)')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(false);
+    await interaction.reply({ content: 'Message sent successfully!', ephemeral: true });
 
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(itemInput),
-                new ActionRowBuilder().addComponents(priceInput),
-                new ActionRowBuilder().addComponents(vouchInput)
-            );
+    await interaction.channel.send({
+        content: `<@&${MEMBER_ROLE_ID}>`,
+        embeds: [embed]
+    });
+}
 
-            await interaction.showModal(modal);
-        }
+async function handleIncentivesCommand(interaction) {
+    if (!interaction.member.roles.cache.has(RS_ROLE_ID)) {
+        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    }
 
-        if (commandName === 'track-points') {
-            const hasRsRole = member.roles.cache.has(RS_ROLE_ID);
-            const hasStaffRole = member.roles.cache.has(STAFF_ROLE_ID);
+    const modal = new ModalBuilder()
+        .setCustomId('incentives_modal')
+        .setTitle('Incentives Entry');
 
-            if (!hasRsRole && !hasStaffRole) {
-                return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-            }
+    const itemInput = new TextInputBuilder()
+        .setCustomId('item_bought')
+        .setLabel('1. Item bought')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
 
-            const targetUser = interaction.options.getUser('user');
-            const totalPoints = await getUserPoints(targetUser.id);
+    const priceInput = new TextInputBuilder()
+        .setCustomId('price_paid')
+        .setLabel('2. Price paid (e.g. ₱200)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
 
-            const description = 
+    const vouchInput = new TextInputBuilder()
+        .setCustomId('vouch_link')
+        .setLabel('3. Vouch link (leave blank if none)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(itemInput),
+        new ActionRowBuilder().addComponents(priceInput),
+        new ActionRowBuilder().addComponents(vouchInput)
+    );
+
+    await interaction.showModal(modal);
+}
+
+async function handleTrackPointsCommand(interaction) {
+    const hasRsRole = interaction.member.roles.cache.has(RS_ROLE_ID);
+    const hasStaffRole = interaction.member.roles.cache.has(STAFF_ROLE_ID);
+
+    if (!hasRsRole && !hasStaffRole) {
+        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    }
+
+    const targetUser = interaction.options.getUser('user');
+    const totalPoints = await getUserPoints(targetUser.id);
+
+    const description = 
 `_ _
 \` user \` : ${targetUser}
 > currently has    :
-ꐚ     **${totalPoints}** points
+ꐚ      **${totalPoints}** points
 _ _`;
 
-            const embed = new EmbedBuilder()
-                .setColor(PASTEL_BLUE)
-                .setDescription(description)
-                .setFooter({ text: getGMT8Timestamp() });
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(description)
+        .setFooter({ text: getGMT8Timestamp() });
 
-            await interaction.reply({ embeds: [embed] });
-        }
+    await interaction.reply({ embeds: [embed] });
+}
 
-        if (commandName === 'status') {
-            const state = interaction.options.getString('state');
-            const selectedLayout = state === 'open' ? OPEN_LAYOUT : CLOSED_LAYOUT;
+async function handlePointsRankCommand(interaction) {
+    const hasRsRole = interaction.member.roles.cache.has(RS_ROLE_ID);
+    const hasStaffRole = interaction.member.roles.cache.has(STAFF_ROLE_ID);
 
-            await interaction.reply({ content: `Status set to **${state}**!`, ephemeral: true });
-            await interaction.channel.send({ content: selectedLayout });
-        }
+    if (!hasRsRole && !hasStaffRole) {
+        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
     }
 
-    if (interaction.isModalSubmit()) {
-        if (interaction.customId === 'incentives_modal') {
-            const itemBought = interaction.fields.getTextInputValue('item_bought');
-            const pricePaid = interaction.fields.getTextInputValue('price_paid');
-            const vouchLink = interaction.fields.getTextInputValue('vouch_link');
+    const topUsers = await getTopPoints(10);
 
-            const { totalAdded, hasVouch } = calculatePoints(pricePaid, vouchLink);
-            const newTotalPoints = await addPoints(interaction.user.id, totalAdded);
+    if (topUsers.length === 0) {
+        return interaction.reply({ content: 'No points recorded for this month yet.', ephemeral: true });
+    }
 
-            const vouchFormatted = (hasVouch && vouchLink.startsWith('http')) 
-                ? `[vouched](${vouchLink})` 
-                : (hasVouch ? `[vouched](${vouchLink})` : 'none');
+    const medals = ['🥇', '🥈', '🥉'];
+    let leaderboardText = topUsers.map((row, index) => {
+        const badge = medals[index] || `${index + 1}.`;
+        return `\({badge}  <@\){row.user_id}> — **${row.points}** pts`;
+    }).join('\n');
 
-            const embedDescription = 
+    const description = 
+`_ _
+           \` 、 \`     **points    leaderboard**    
+~~                                                                        ~~
+${leaderboardText}
+~~                                                                        ~~`;
+
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(description)
+        .setFooter({ text: getGMT8Timestamp() });
+
+    await interaction.reply({ embeds: [embed] });
+}
+
+async function handleStatusCommand(interaction) {
+    const state = interaction.options.getString('state');
+    const selectedLayout = state === 'open' ? OPEN_LAYOUT : CLOSED_LAYOUT;
+
+    await interaction.reply({ content: `Status set to **${state}**!`, ephemeral: true });
+    await interaction.channel.send({ content: selectedLayout });
+}
+
+async function handleIncentivesModal(interaction) {
+    const itemBought = interaction.fields.getTextInputValue('item_bought');
+    const pricePaid = interaction.fields.getTextInputValue('price_paid');
+    const vouchLink = interaction.fields.getTextInputValue('vouch_link');
+
+    const { totalAdded, hasVouch } = calculatePoints(pricePaid, vouchLink);
+    const newTotalPoints = await addPoints(interaction.user.id, totalAdded);
+
+    const vouchFormatted = (hasVouch && vouchLink.startsWith('http')) 
+        ? `[vouched](${vouchLink})` 
+        : (hasVouch ? `[vouched](${vouchLink})` : 'none');
+
+    const embedDescription = 
 `_ _
            \` 、 \`     **reseller    points**    
 ~~                                                                        ~~
-⌒⌒   \ ${interaction.user}   <:hearty:1554781762813558804>\ ${itemBought}
-⌒⌒   \ ${pricePaid}  <:hearty:1554781762813558804>\ ${vouchFormatted}
+⌒⌒   \ \({interaction.user}   <:hearty:1554781762813558804>\\){itemBought}
+⌒⌒   \ \({pricePaid}  <:hearty:1554781762813558804>\\){vouchFormatted}
 <:zz_blueheart3:1555584821529546752>  \` current pts \`     ꐚ     __**${newTotalPoints}**__
 ~~                                                                        ~~`;
 
-            const embed = new EmbedBuilder()
-                .setColor(PASTEL_BLUE)
-                .setDescription(embedDescription)
-                .setFooter({ text: getGMT8Timestamp() });
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(embedDescription)
+        .setFooter({ text: getGMT8Timestamp() });
 
-            const targetChannel = await interaction.client.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
-            if (targetChannel) {
-                await targetChannel.send({ embeds: [embed] });
-                await interaction.reply({ content: `Incentives logged successfully in <#${TARGET_CHANNEL_ID}>!`, ephemeral: true });
-            } else {
-                await interaction.reply({ content: `Submitted successfully, but target channel <#${TARGET_CHANNEL_ID}> was not found.`, ephemeral: true });
-            }
+    const targetChannel = await interaction.client.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
+    if (targetChannel) {
+        await targetChannel.send({ embeds: [embed] });
+        await interaction.reply({ content: `Incentives logged successfully in <#${TARGET_CHANNEL_ID}>!`, ephemeral: true });
+    } else {
+        await interaction.reply({ content: `Submitted successfully, but target channel <#${TARGET_CHANNEL_ID}> was not found.`, ephemeral: true });
+    }
+}
+
+// -------------------------------------------------------------
+// 6. MAIN INTERACTION ROUTER
+// -------------------------------------------------------------
+client.on('interactionCreate', async (interaction) => {
+    // Handle Slash Commands
+    if (interaction.isChatInputCommand()) {
+        switch (interaction.commandName) {
+            case 'say':
+                return handleSayCommand(interaction);
+            case 'incentives':
+                return handleIncentivesCommand(interaction);
+            case 'track-points':
+                return handleTrackPointsCommand(interaction);
+            case 'points-rank':
+                return handlePointsRankCommand(interaction);
+            case 'status':
+                return handleStatusCommand(interaction);
+        }
+    }
+
+    // Handle Modal Submissions
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId === 'incentives_modal') {
+            return handleIncentivesModal(interaction);
         }
     }
 });
