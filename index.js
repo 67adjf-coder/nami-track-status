@@ -225,14 +225,19 @@ async function handleSayCommand(interaction) {
 
     const userMessage = interaction.options.getString('message');
 
+    // Extract user pings (<@123>), role pings (<@&123>), @everyone, and @here from the typed text
+    const mentions = userMessage.match(/<@&?\d+>|@everyone|@here/g);
+    const contentPing = mentions ? mentions.join(' ') : null;
+
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
         .setDescription(userMessage);
 
     await interaction.reply({ content: 'Message sent successfully!', ephemeral: true });
 
-    // Sends embed directly and allows user/role/everyone mentions inside to trigger pings
+    // Sends mentions via message content outside the embed so Discord triggers the notification ping
     await interaction.channel.send({
+        content: contentPing,
         embeds: [embed],
         allowedMentions: { parse: ['roles', 'users', 'everyone'] }
     });
