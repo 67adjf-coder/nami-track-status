@@ -91,7 +91,6 @@ function getTopPoints(limit = 10) {
 const PASTEL_BLUE = 0xAEC6CF;
 const RS_ROLE_ID = '1522171090888163328';
 const STAFF_ROLE_ID = '1533372358755221566';
-const MEMBER_ROLE_ID = '1507222001972940861';
 const TARGET_CHANNEL_ID = '1555770267706466364';
 
 function getGMT8Timestamp() {
@@ -232,9 +231,10 @@ async function handleSayCommand(interaction) {
 
     await interaction.reply({ content: 'Message sent successfully!', ephemeral: true });
 
+    // Sends embed directly and allows user/role/everyone mentions inside to trigger pings
     await interaction.channel.send({
-        content: `<@&${MEMBER_ROLE_ID}>`,
-        embeds: [embed]
+        embeds: [embed],
+        allowedMentions: { parse: ['roles', 'users', 'everyone'] }
     });
 }
 
