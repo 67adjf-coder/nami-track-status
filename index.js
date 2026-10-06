@@ -72,6 +72,24 @@ function addPoints(userId, amount) {
     });
 }
 
+function resetUserPoints(userId) {
+    return new Promise((resolve, reject) => {
+        db.run('DELETE FROM user_points WHERE user_id = ?', [userId], (err) => {
+            if (err) return reject(err);
+            resolve();
+        });
+    });
+}
+
+function resetAllPoints() {
+    return new Promise((resolve, reject) => {
+        db.run('DELETE FROM user_points', (err) => {
+            if (err) return reject(err);
+            resolve();
+        });
+    });
+}
+
 function getTopPoints(limit = 10) {
     return new Promise((resolve, reject) => {
         db.all(
@@ -124,9 +142,9 @@ function calculatePoints(priceText, vouchLinkText) {
 }
 
 // Monthly auto-reset on the 1st day of every month at midnight GMT+8
-cron.schedule('0 0 5 * *', () => {
+cron.schedule('0 0 1 * *', async () => {
     console.log('Resetting all points for the new month...');
-    db.run('DELETE FROM user_points');
+    await resetAllPoints();
 }, {
     timezone: 'Asia/Singapore'
 });
@@ -200,7 +218,24 @@ const commands = [
         .addStringOption(opt => 
             opt.setName('message')
                .setDescription('Type the text/announcement you want the bot to send')
-               .setRequired(true))
+               .setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('reset-points')
+        .setDescription('Reset reseller points for a user or everyone')
+        .addStringOption(option =>
+            option.setName('target')
+                .setDescription('Select whether to reset everyone or a single user')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'All Users', value: 'all' },
+                    { name: 'Specific User', value: 'user' }
+                )
+        )
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('The user to reset (required if target is "Specific User")')
+                .setRequired(false)
+        )
 ].map(cmd => cmd.toJSON());
 
 client.once('ready', async () => {
@@ -208,7 +243,7 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('All 5 slash commands registered globally!');
+        console.log('All 6 slash commands registered globally!');
     } catch (err) {
         console.error('Error registering commands:', err);
     }
@@ -225,7 +260,6 @@ async function handleSayCommand(interaction) {
 
     const userMessage = interaction.options.getString('message');
 
-    // Extract user pings (<@123>), role pings (<@&123>), @everyone, and @here from the typed text
     const mentions = userMessage.match(/<@&?\d+>|@everyone|@here/g);
     const contentPing = mentions ? mentions.join(' ') : null;
 
@@ -235,12 +269,45 @@ async function handleSayCommand(interaction) {
 
     await interaction.reply({ content: 'Message sent successfully!', ephemeral: true });
 
-    // Sends mentions via message content outside the embed so Discord triggers the notification ping
     await interaction.channel.send({
         content: contentPing,
         embeds: [embed],
         allowedMentions: { parse: ['roles', 'users', 'everyone'] }
     });
+}
+
+async function handleResetPointsCommand(interaction) {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
+        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    }
+
+    const targetType = interaction.options.getString('target');
+    const targetUser = interaction.options.getUser('user');
+
+    if (targetType === 'user' && !targetUser) {
+        return interaction.reply({ 
+            content: 'Please specify a user when selecting "Specific User".', 
+            ephemeral: true 
+        });
+    }
+
+    if (targetType === 'all') {
+        await resetAllPoints();
+        const embed = new EmbedBuilder()
+            .setColor(PASTEL_BLUE)
+            .setDescription('` success ` : All reseller points have been reset to **0**.')
+            .setFooter({ text: getGMT8Timestamp() });
+
+        return interaction.reply({ embeds: [embed] });
+    } else {
+        await resetUserPoints(targetUser.id);
+        const embed = new EmbedBuilder()
+            .setColor(PASTEL_BLUE)
+            .setDescription(`\` success \` : Points for ${targetUser} have been reset to **0**.`)
+            .setFooter({ text: getGMT8Timestamp() });
+
+        return interaction.reply({ embeds: [embed] });
+    }
 }
 
 async function handleIncentivesCommand(interaction) {
@@ -327,7 +394,7 @@ async function handlePointsRankCommand(interaction) {
 
     const formattedRanks = topUsers.map((row, index) => {
         const rankNum = index + 1;
-        return `\` ⌗\ ${rankNum} \`  : <@\ ${row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
+        return `\` ⌗\({rankNum} \`  : <@\){row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
     }).join('\n\n');
 
     const description = 
@@ -368,8 +435,8 @@ async function handleIncentivesModal(interaction) {
 `_ _
            \` 、 \`     **reseller    points**    
 ~~                                                                        ~~
-⌒⌒    ${interaction.user}   <:hearty:1554781762813558804> ${itemBought}
-⌒⌒    ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
+⌒⌒   ${interaction.user}   <:hearty:1554781762813558804> ${itemBought}
+⌒⌒   ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
 <:zz_blueheart3:1555584821529546752>  \` current pts \`     ꐚ     __**${newTotalPoints}**__
 ~~                                                                        ~~`;
 
@@ -391,11 +458,12 @@ async function handleIncentivesModal(interaction) {
 // 6. MAIN INTERACTION ROUTER
 // -------------------------------------------------------------
 client.on('interactionCreate', async (interaction) => {
-    // Handle Slash Commands
     if (interaction.isChatInputCommand()) {
         switch (interaction.commandName) {
             case 'say':
                 return handleSayCommand(interaction);
+            case 'reset-points':
+                return handleResetPointsCommand(interaction);
             case 'incentives':
                 return handleIncentivesCommand(interaction);
             case 'track-points':
@@ -407,12 +475,6 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // Handle Modal Submissions
     if (interaction.isModalSubmit()) {
         if (interaction.customId === 'incentives_modal') {
-            return handleIncentivesModal(interaction);
-        }
-    }
-});
-
-client.login(process.env.DISCORD_TOKEN);
+            return handle
