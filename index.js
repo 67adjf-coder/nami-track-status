@@ -124,7 +124,7 @@ function calculatePoints(priceText, vouchLinkText) {
 }
 
 // Monthly auto-reset on the 1st day of every month at midnight GMT+8
-cron.schedule('0 0 1 * *', () => {
+cron.schedule('0 0 5 * *', () => {
     console.log('Resetting all points for the new month...');
     db.run('DELETE FROM user_points');
 }, {
@@ -327,7 +327,7 @@ async function handlePointsRankCommand(interaction) {
 
     const formattedRanks = topUsers.map((row, index) => {
         const rankNum = index + 1;
-        return `\` ⌗\({rankNum} \`  : <@\){row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
+        return `\` ⌗\ ${rankNum} \`  : <@\ ${row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
     }).join('\n\n');
 
     const description = 
@@ -368,8 +368,8 @@ async function handleIncentivesModal(interaction) {
 `_ _
            \` 、 \`     **reseller    points**    
 ~~                                                                        ~~
-⌒⌒   \({interaction.user}   <:hearty:1554781762813558804>\){itemBought}
-⌒⌒   \({pricePaid}  <:hearty:1554781762813558804>\){vouchFormatted}
+⌒⌒    ${interaction.user}   <:hearty:1554781762813558804> ${itemBought}
+⌒⌒    ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
 <:zz_blueheart3:1555584821529546752>  \` current pts \`     ꐚ     __**${newTotalPoints}**__
 ~~                                                                        ~~`;
 
