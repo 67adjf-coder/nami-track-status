@@ -394,7 +394,7 @@ async function handlePointsRankCommand(interaction) {
 
     const formattedRanks = topUsers.map((row, index) => {
         const rankNum = index + 1;
-        return `\` ⌗\({rankNum} \`  : <@${row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
+        return `\` ⌗ ${rankNum} \`  : <@${row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
     }).join('\n\n');
 
     const description = 
@@ -429,7 +429,7 @@ async function handleIncentivesModal(interaction) {
 
     const vouchFormatted = (hasVouch && vouchLink.startsWith('http')) 
         ? `[vouched](${vouchLink})` 
-        : (hasVouch ? `[vouched](${vouchLink})` : 'none');
+        : (hasVouch ? `[valid vouched](${vouchLink})` : 'none');
 
     const embedDescription = 
 `_ _
@@ -477,4 +477,9 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isModalSubmit()) {
         if (interaction.customId === 'incentives_modal') {
-            return handle
+            return handleIncentivesModal(interaction);
+        }
+    }
+});
+
+client.login(process.env.DISCORD_TOKEN);
