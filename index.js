@@ -394,7 +394,7 @@ async function handlePointsRankCommand(interaction) {
 
     const formattedRanks = topUsers.map((row, index) => {
         const rankNum = index + 1;
-        return `\` ⌗\({rankNum} \`  : <@\){row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
+        return `\` ⌗\({rankNum} \`  : <@${row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
     }).join('\n\n');
 
     const description = 
