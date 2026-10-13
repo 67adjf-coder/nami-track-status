@@ -10,7 +10,7 @@ const {
     TextInputStyle, 
     ActionRowBuilder 
 } = require('discord.js');
-const sqlite3 = require('sqlite3').verbose();
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const cron = require('node-cron');
 const express = require('express');
 require('dotenv').config();
@@ -30,77 +30,65 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // -------------------------------------------------------------
-// 2. DATABASE SETUP FOR POINTS TRACKER (sqlite3)
+// 2. MONGODB ATLAS DATABASE SETUP
 // -------------------------------------------------------------
-const db = new sqlite3.Database('points.db');
-
-db.serialize(() => {
-    db.run(`
-        CREATE TABLE IF NOT EXISTS user_points (
-            user_id TEXT PRIMARY KEY,
-            points INTEGER DEFAULT 0
-        )
-    `);
+const mongoClient = new MongoClient(process.env.MONGODB_URI, {
+    serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+    }
 });
 
-// Helper database functions using Promises
-function getUserPoints(userId) {
-    return new Promise((resolve, reject) => {
-        db.get('SELECT points FROM user_points WHERE user_id = ?', [userId], (err, row) => {
-            if (err) return reject(err);
-            resolve(row ? row.points : 0);
-        });
-    });
+let pointsCollection;
+
+async function connectDatabase() {
+    try {
+        await mongoClient.connect();
+        const db = mongoClient.db('coastal_cart');
+        pointsCollection = db.collection('user_points');
+        console.log('Connected successfully to MongoDB Atlas!');
+    } catch (err) {
+        console.error('MongoDB connection error:', err);
+    }
+}
+connectDatabase();
+
+// Database Helper Functions
+async function getUserPoints(userId) {
+    if (!pointsCollection) return 0;
+    const user = await pointsCollection.findOne({ user_id: userId });
+    return user ? user.points : 0;
 }
 
-function addPoints(userId, amount) {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const current = await getUserPoints(userId);
-            const newTotal = current + amount;
-            db.run(
-                'INSERT INTO user_points (user_id, points) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET points = ?',
-                [userId, newTotal, newTotal],
-                (err) => {
-                    if (err) return reject(err);
-                    resolve(newTotal);
-                }
-            );
-        } catch (err) {
-            reject(err);
-        }
-    });
+async function addPoints(userId, amount) {
+    if (!pointsCollection) throw new Error('Database not connected');
+    const current = await getUserPoints(userId);
+    const newTotal = current + amount;
+    await pointsCollection.updateOne(
+        { user_id: userId },
+        { $set: { points: newTotal } },
+        { upsert: true }
+    );
+    return newTotal;
 }
 
-function resetUserPoints(userId) {
-    return new Promise((resolve, reject) => {
-        db.run('DELETE FROM user_points WHERE user_id = ?', [userId], (err) => {
-            if (err) return reject(err);
-            resolve();
-        });
-    });
+async function resetUserPoints(userId) {
+    if (!pointsCollection) return;
+    await pointsCollection.deleteOne({ user_id: userId });
 }
 
-function resetAllPoints() {
-    return new Promise((resolve, reject) => {
-        db.run('DELETE FROM user_points', (err) => {
-            if (err) return reject(err);
-            resolve();
-        });
-    });
+async function resetAllPoints() {
+    if (!pointsCollection) return;
+    await pointsCollection.deleteMany({});
 }
 
-function getTopPoints(limit = 10) {
-    return new Promise((resolve, reject) => {
-        db.all(
-            'SELECT user_id, points FROM user_points ORDER BY points DESC LIMIT ?',
-            [limit],
-            (err, rows) => {
-                if (err) return reject(err);
-                resolve(rows || []);
-            }
-        );
-    });
+async function getTopPoints(limit = 10) {
+    if (!pointsCollection) return [];
+    return await pointsCollection.find({})
+        .sort({ points: -1 })
+        .limit(limit)
+        .toArray();
 }
 
 // -------------------------------------------------------------
@@ -154,7 +142,7 @@ const OPEN_LAYOUT = `_ _
 #         [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( open ) ༄
 -# _ _    <@&1533372358755221566>    will be here to assist you !
 ~~                                                                                                  ~~
-                   <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
+                   <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
                    
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
@@ -169,7 +157,7 @@ const CLOSED_LAYOUT = `_ _
 #      [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( closed ) ༄
 -# _ _    <@&1533372358755221566>    will serve you tomorrow !
 ~~                                                                                                  ~~
-                  <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
+                  <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
                   
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
@@ -259,7 +247,6 @@ async function handleSayCommand(interaction) {
     }
 
     const userMessage = interaction.options.getString('message');
-
     const mentions = userMessage.match(/<@&?\d+>|@everyone|@here/g);
     const contentPing = mentions ? mentions.join(' ') : null;
 
@@ -268,7 +255,6 @@ async function handleSayCommand(interaction) {
         .setDescription(userMessage);
 
     await interaction.reply({ content: 'Message sent successfully!', ephemeral: true });
-
     await interaction.channel.send({
         content: contentPing,
         embeds: [embed],
@@ -399,7 +385,7 @@ async function handlePointsRankCommand(interaction) {
 
     const description = 
 `_ _
-> <:links:1555857271446310923>  \` incentives rank \` 
+> <:links:1555857271446310923>   \` incentives rank \`  
 
 ${formattedRanks}`;
 
@@ -433,12 +419,12 @@ async function handleIncentivesModal(interaction) {
 
     const embedDescription = 
 `_ _
-           \` 、 \`     **reseller    points**    
-~~                                                                        ~~
-⌒⌒   ${interaction.user}   <:hearty:1554781762813558804> ${itemBought}
-⌒⌒   ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
-<:zz_blueheart3:1555584821529546752>  \` current pts \`     ꐚ     __**${newTotalPoints}**__
-~~                                                                        ~~`;
+            \` 、 \`     **reseller   points**    
+~~                                                                      ~~
+⌒⌒    ${interaction.user}    <:hearty:1554781762813558804> ${itemBought}
+⌒⌒    ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
+<:zz_blueheart3:1555584821529546752>   \` current pts \`     ꐚ     __**${newTotalPoints}**__
+~~                                                                      ~~`;
 
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
