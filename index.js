@@ -141,30 +141,30 @@ cron.schedule('0 0 1 * *', async () => {
 const OPEN_LAYOUT = `_ _
 #         [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( open ) ༄
 -# _ _    <@&1533372358755221566>    will be here to assist you !
-~~                                                                                                  ~~
-                   <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
-                   
+~~                                                                              ~~
+               <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
+               
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
          <:hearty:1554781762813558804>    always vouch your items for warranty!
          <:hearty:1554781762813558804>    rude & rush buyers will not be entertained
-~~                                                                                                  ~~
-          <:zz_blueheart3:1555584821529546752>     **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
+~~                                                                              ~~
+          <:zz_blueheart3:1555584821529546752>    **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
           <:zz_blueheart3:1555584821529546752>    ** [vouch items](https://discord.com/channels/1507214174084927498/1507271897962778706)**    ꕀ    for warranty
 _ _`;
 
 const CLOSED_LAYOUT = `_ _
 #      [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( closed ) ༄
 -# _ _    <@&1533372358755221566>    will serve you tomorrow !
-~~                                                                                                  ~~
-                  <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
-                  
+~~                                                                              ~~
+                 <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
+                 
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
          <:hearty:1554781762813558804>    always vouch your items for warranty!
          <:hearty:1554781762813558804>    rude & rush buyers will not be entertained
-~~                                                                                                  ~~
-          <:zz_blueheart3:1555584821529546752>     **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
+~~                                                                              ~~
+          <:zz_blueheart3:1555584821529546752>    **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
           <:zz_blueheart3:1555584821529546752>    ** [vouch items](https://discord.com/channels/1507214174084927498/1507271897962778706)**    ꕀ    for warranty
 _ _`;
 
@@ -223,6 +223,19 @@ const commands = [
             option.setName('user')
                 .setDescription('The user to reset (required if target is "Specific User")')
                 .setRequired(false)
+        ),
+    new SlashCommandBuilder()
+        .setName('add-points')
+        .setDescription('Manually add points to a user (Staff only)')
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('The user to add points to')
+                .setRequired(true)
+        )
+        .addIntegerOption(option =>
+            option.setName('amount')
+                .setDescription('The number of points to add')
+                .setRequired(true)
         )
 ].map(cmd => cmd.toJSON());
 
@@ -231,7 +244,7 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('All 6 slash commands registered globally!');
+        console.log('All slash commands registered globally!');
     } catch (err) {
         console.error('Error registering commands:', err);
     }
@@ -294,6 +307,28 @@ async function handleResetPointsCommand(interaction) {
 
         return interaction.reply({ embeds: [embed] });
     }
+}
+
+async function handleAddPointsCommand(interaction) {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
+        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    }
+
+    const targetUser = interaction.options.getUser('user');
+    const amount = interaction.options.getInteger('amount');
+
+    if (amount <= 0) {
+        return interaction.reply({ content: 'Please provide a valid point amount greater than 0.', ephemeral: true });
+    }
+
+    const newTotal = await addPoints(targetUser.id, amount);
+
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(`\` success \` : Successfully added **${amount}** points to ${targetUser}.\n> New total: **${newTotal}** points`)
+        .setFooter({ text: getGMT8Timestamp() });
+
+    await interaction.reply({ embeds: [embed] });
 }
 
 async function handleIncentivesCommand(interaction) {
@@ -385,7 +420,7 @@ async function handlePointsRankCommand(interaction) {
 
     const description = 
 `_ _
-> <:links:1555857271446310923>   \` incentives rank \`  
+> <:links:1555857271446310923>    \` incentives rank \`  
 
 ${formattedRanks}`;
 
@@ -419,12 +454,12 @@ async function handleIncentivesModal(interaction) {
 
     const embedDescription = 
 `_ _
-            \` 、 \`     **reseller   points**    
-~~                                                                      ~~
+            \` 、 \`     **reseller   points**     
+~~                                                             ~~
 ⌒⌒    ${interaction.user}    <:hearty:1554781762813558804> ${itemBought}
 ⌒⌒    ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
-<:zz_blueheart3:1555584821529546752>   \` current pts \`     ꐚ     __**${newTotalPoints}**__
-~~                                                                      ~~`;
+<:zz_blueheart3:1555584821529546752>    \` current pts \`     ꐚ     __**${newTotalPoints}**__
+~~                                                             ~~`;
 
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
@@ -450,6 +485,8 @@ client.on('interactionCreate', async (interaction) => {
                 return handleSayCommand(interaction);
             case 'reset-points':
                 return handleResetPointsCommand(interaction);
+            case 'add-points':
+                return handleAddPointsCommand(interaction);
             case 'incentives':
                 return handleIncentivesCommand(interaction);
             case 'track-points':
