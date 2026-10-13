@@ -73,6 +73,17 @@ async function addPoints(userId, amount) {
     return newTotal;
 }
 
+async function setPoints(userId, amount) {
+    if (!pointsCollection) throw new Error('Database not connected');
+    const newTotal = Math.max(0, amount);
+    await pointsCollection.updateOne(
+        { user_id: userId },
+        { $set: { points: newTotal } },
+        { upsert: true }
+    );
+    return newTotal;
+}
+
 async function resetUserPoints(userId) {
     if (!pointsCollection) return;
     await pointsCollection.deleteOne({ user_id: userId });
@@ -225,16 +236,25 @@ const commands = [
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
-        .setName('add-points')
-        .setDescription('Manually add points to a user (Staff only)')
+        .setName('edit-points')
+        .setDescription('Add or remove points from a user (Staff only)')
+        .addStringOption(option =>
+            option.setName('action')
+                .setDescription('Choose whether to add or remove points')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'Add', value: 'add' },
+                    { name: 'Remove', value: 'remove' }
+                )
+        )
         .addUserOption(option =>
             option.setName('user')
-                .setDescription('The user to add points to')
+                .setDescription('The target user')
                 .setRequired(true)
         )
         .addIntegerOption(option =>
             option.setName('amount')
-                .setDescription('The number of points to add')
+                .setDescription('The number of points')
                 .setRequired(true)
         )
 ].map(cmd => cmd.toJSON());
@@ -309,11 +329,12 @@ async function handleResetPointsCommand(interaction) {
     }
 }
 
-async function handleAddPointsCommand(interaction) {
+async function handleEditPointsCommand(interaction) {
     if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
     }
 
+    const action = interaction.options.getString('action');
     const targetUser = interaction.options.getUser('user');
     const amount = interaction.options.getInteger('amount');
 
@@ -321,11 +342,21 @@ async function handleAddPointsCommand(interaction) {
         return interaction.reply({ content: 'Please provide a valid point amount greater than 0.', ephemeral: true });
     }
 
-    const newTotal = await addPoints(targetUser.id, amount);
+    const currentPoints = await getUserPoints(targetUser.id);
+    let newTotal;
+
+    if (action === 'add') {
+        newTotal = await addPoints(targetUser.id, amount);
+    } else {
+        newTotal = Math.max(0, currentPoints - amount);
+        await setPoints(targetUser.id, newTotal);
+    }
+
+    const actionText = action === 'add' ? `added **${amount}** to` : `removed **${amount}** from`;
 
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
-        .setDescription(`\` success \` : Successfully added **${amount}** points to ${targetUser}.\n> New total: **${newTotal}** points`)
+        .setDescription(`\` success \` : Successfully ${actionText} ${targetUser}.\n> New total: **${newTotal}** points`)
         .setFooter({ text: getGMT8Timestamp() });
 
     await interaction.reply({ embeds: [embed] });
@@ -485,8 +516,8 @@ client.on('interactionCreate', async (interaction) => {
                 return handleSayCommand(interaction);
             case 'reset-points':
                 return handleResetPointsCommand(interaction);
-            case 'add-points':
-                return handleAddPointsCommand(interaction);
+            case 'edit-points':
+                return handleEditPointsCommand(interaction);
             case 'incentives':
                 return handleIncentivesCommand(interaction);
             case 'track-points':
