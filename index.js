@@ -30,9 +30,14 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // -------------------------------------------------------------
-// 2. MONGODB ATLAS DATABASE SETUP
+// 2. MONGODB ATLAS DATABASE SETUP (BULLETPROOF CONNECTION)
 // -------------------------------------------------------------
-const mongoClient = new MongoClient(process.env.MONGODB_URI, {
+const uri = process.env.MONGODB_URI;
+if (!uri) {
+    console.error('CRITICAL ERROR: MONGODB_URI environment variable is missing!');
+}
+
+const mongoClient = new MongoClient(uri || '', {
     serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -40,43 +45,37 @@ const mongoClient = new MongoClient(process.env.MONGODB_URI, {
     }
 });
 
-let pointsCollection;
+let dbInstance = null;
+let pointsCollection = null;
 
-async function connectDatabase() {
+async function getCollection() {
+    if (pointsCollection) return pointsCollection;
     try {
-        await mongoClient.connect();
-        const db = mongoClient.db('coastal_cart');
-        pointsCollection = db.collection('user_points');
-        console.log('Connected successfully to MongoDB Atlas!');
+        if (!dbInstance) {
+            await mongoClient.connect();
+            dbInstance = mongoClient.db('coastal_cart');
+            console.log('Connected successfully to MongoDB Atlas!');
+        }
+        pointsCollection = dbInstance.collection('user_points');
+        return pointsCollection;
     } catch (err) {
         console.error('MongoDB connection error:', err);
+        throw new Error('Database not connected');
     }
 }
-connectDatabase();
 
-// Database Helper Functions
+// Database Helper Functions with automatic connection waiting
 async function getUserPoints(userId) {
-    if (!pointsCollection) return 0;
-    const user = await pointsCollection.findOne({ user_id: userId });
+    const col = await getCollection();
+    const user = await col.findOne({ user_id: userId });
     return user ? user.points : 0;
 }
 
 async function addPoints(userId, amount) {
-    if (!pointsCollection) throw new Error('Database not connected');
+    const col = await getCollection();
     const current = await getUserPoints(userId);
     const newTotal = current + amount;
-    await pointsCollection.updateOne(
-        { user_id: userId },
-        { $set: { points: newTotal } },
-        { upsert: true }
-    );
-    return newTotal;
-}
-
-async function setPoints(userId, amount) {
-    if (!pointsCollection) throw new Error('Database not connected');
-    const newTotal = Math.max(0, amount);
-    await pointsCollection.updateOne(
+    await col.updateOne(
         { user_id: userId },
         { $set: { points: newTotal } },
         { upsert: true }
@@ -85,18 +84,18 @@ async function setPoints(userId, amount) {
 }
 
 async function resetUserPoints(userId) {
-    if (!pointsCollection) return;
-    await pointsCollection.deleteOne({ user_id: userId });
+    const col = await getCollection();
+    await col.deleteOne({ user_id: userId });
 }
 
 async function resetAllPoints() {
-    if (!pointsCollection) return;
-    await pointsCollection.deleteMany({});
+    const col = await getCollection();
+    await col.deleteMany({});
 }
 
 async function getTopPoints(limit = 10) {
-    if (!pointsCollection) return [];
-    return await pointsCollection.find({})
+    const col = await getCollection();
+    return await col.find({})
         .sort({ points: -1 })
         .limit(limit)
         .toArray();
@@ -108,7 +107,8 @@ async function getTopPoints(limit = 10) {
 const PASTEL_BLUE = 0xAEC6CF;
 const RS_ROLE_ID = '1522171090888163328';
 const STAFF_ROLE_ID = '1533372358755221566';
-const TARGET_CHANNEL_ID = '1555770267706466364';
+const TARGET_CHANNEL_ID = '1555770267706466364'; // Public/Main incentives channel
+const LOG_CHANNEL_ID = '1559515311034601512';    // Private secondary log channel
 
 function getGMT8Timestamp() {
     return new Date().toLocaleString('en-US', {
@@ -140,10 +140,30 @@ function calculatePoints(priceText, vouchLinkText) {
     return { totalAdded, hasVouch };
 }
 
-// Monthly auto-reset on the 1st day of every month at midnight GMT+8
+// Monthly auto-reset on the 1st day of every month at midnight GMT+8 with history backup
 cron.schedule('0 0 1 * *', async () => {
     console.log('Resetting all points for the new month...');
-    await resetAllPoints();
+    try {
+        const topUsers = await getTopPoints(50);
+        let summaryText = topUsers.length > 0 
+            ? topUsers.map((r, i) => `\` #${i + 1} \` <@${r.user_id}> — **${r.points} pts**`).join('\n')
+            : 'No points recorded this month.';
+
+        const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+        if (logChannel) {
+            const summaryEmbed = new EmbedBuilder()
+                .setColor(PASTEL_BLUE)
+                .setTitle('📊 Monthly Reseller Points Wrap-Up & Reset')
+                .setDescription(`The monthly points leaderboard has been reset for the new month.\n\n**Final Standings:**\n${summaryText}`)
+                .setFooter({ text: getGMT8Timestamp() });
+            
+            await logChannel.send({ embeds: [summaryEmbed] });
+        }
+
+        await resetAllPoints();
+    } catch (err) {
+        console.error('Error during monthly points reset:', err);
+    }
 }, {
     timezone: 'Asia/Singapore'
 });
@@ -152,30 +172,30 @@ cron.schedule('0 0 1 * *', async () => {
 const OPEN_LAYOUT = `_ _
 #         [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( open ) ༄
 -# _ _    <@&1533372358755221566>    will be here to assist you !
-~~                                                                              ~~
-               <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
-               
+~~                                                                                                  ~~
+                   <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
+                   
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
          <:hearty:1554781762813558804>    always vouch your items for warranty!
          <:hearty:1554781762813558804>    rude & rush buyers will not be entertained
-~~                                                                              ~~
-          <:zz_blueheart3:1555584821529546752>    **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
+~~                                                                                                  ~~
+          <:zz_blueheart3:1555584821529546752>     **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
           <:zz_blueheart3:1555584821529546752>    ** [vouch items](https://discord.com/channels/1507214174084927498/1507271897962778706)**    ꕀ    for warranty
 _ _`;
 
 const CLOSED_LAYOUT = `_ _
 #      [𝓒oastal  𝓒art](https://.gg/coastalcart) : ( closed ) ༄
 -# _ _    <@&1533372358755221566>    will serve you tomorrow !
-~~                                                                              ~~
-                 <@&1507222001972940861>    𝓢hop     𝓔ssentials    :
-                 
+~~                                                                                                  ~~
+                  <@&1507222001972940861>    𝓢hop      𝓔ssentials    :
+                  
          <:hearty:1554781762813558804>    kindly read our shop [rules](https://discord.com/channels/1507214174084927498/1507219714131365898) always
          <:hearty:1554781762813558804>    always __ask__ before creating a ticket
          <:hearty:1554781762813558804>    always vouch your items for warranty!
          <:hearty:1554781762813558804>    rude & rush buyers will not be entertained
-~~                                                                              ~~
-          <:zz_blueheart3:1555584821529546752>    **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
+~~                                                                                                  ~~
+          <:zz_blueheart3:1555584821529546752>     **[ticket booth](https://discord.com/channels/1507214174084927498/1507271610837762170) **    ꕀ    to purchase
           <:zz_blueheart3:1555584821529546752>    ** [vouch items](https://discord.com/channels/1507214174084927498/1507271897962778706)**    ꕀ    for warranty
 _ _`;
 
@@ -236,25 +256,11 @@ const commands = [
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
-        .setName('edit-points')
-        .setDescription('Add or remove points from a user (Staff only)')
+        .setName('calcu')
+        .setDescription('Calculate numbers with support for k (thousand) and m (million)')
         .addStringOption(option =>
-            option.setName('action')
-                .setDescription('Choose whether to add or remove points')
-                .setRequired(true)
-                .addChoices(
-                    { name: 'Add', value: 'add' },
-                    { name: 'Remove', value: 'remove' }
-                )
-        )
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('The target user')
-                .setRequired(true)
-        )
-        .addIntegerOption(option =>
-            option.setName('amount')
-                .setDescription('The number of points')
+            option.setName('expression')
+                .setDescription('Enter math expression (e.g., 1.5k + 500 or 10m / 4)')
                 .setRequired(true)
         )
 ].map(cmd => cmd.toJSON());
@@ -327,39 +333,6 @@ async function handleResetPointsCommand(interaction) {
 
         return interaction.reply({ embeds: [embed] });
     }
-}
-
-async function handleEditPointsCommand(interaction) {
-    if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
-        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-    }
-
-    const action = interaction.options.getString('action');
-    const targetUser = interaction.options.getUser('user');
-    const amount = interaction.options.getInteger('amount');
-
-    if (amount <= 0) {
-        return interaction.reply({ content: 'Please provide a valid point amount greater than 0.', ephemeral: true });
-    }
-
-    const currentPoints = await getUserPoints(targetUser.id);
-    let newTotal;
-
-    if (action === 'add') {
-        newTotal = await addPoints(targetUser.id, amount);
-    } else {
-        newTotal = Math.max(0, currentPoints - amount);
-        await setPoints(targetUser.id, newTotal);
-    }
-
-    const actionText = action === 'add' ? `added **${amount}** to` : `removed **${amount}** from`;
-
-    const embed = new EmbedBuilder()
-        .setColor(PASTEL_BLUE)
-        .setDescription(`\` success \` : Successfully ${actionText} ${targetUser}.\n> New total: **${newTotal}** points`)
-        .setFooter({ text: getGMT8Timestamp() });
-
-    await interaction.reply({ embeds: [embed] });
 }
 
 async function handleIncentivesCommand(interaction) {
@@ -451,7 +424,7 @@ async function handlePointsRankCommand(interaction) {
 
     const description = 
 `_ _
-> <:links:1555857271446310923>    \` incentives rank \`  
+> <:links:1555857271446310923>   \` incentives rank \`  
 
 ${formattedRanks}`;
 
@@ -471,6 +444,36 @@ async function handleStatusCommand(interaction) {
     await interaction.channel.send({ content: selectedLayout });
 }
 
+async function handleCalcuCommand(interaction) {
+    const exprInput = interaction.options.getString('expression');
+
+    try {
+        const parsedExpr = exprInput.replace(/(\d+(?:\.\d+)?)\s*([km])/gi, (match, num, suffix) => {
+            const multiplier = suffix.toLowerCase() === 'k' ? 1000 : 1000000;
+            return parseFloat(num) * multiplier;
+        });
+
+        if (!/^[\d\+\-\*\/\.\(\)\s]+$/.test(parsedExpr)) {
+            return interaction.reply({ content: '❌ Invalid expression! Only use numbers, basic math operators (+, -, *, /), and k/m.', ephemeral: true });
+        }
+
+        const result = Function('"use strict";return (' + parsedExpr + ')')();
+
+        if (isNaN(result) || !isFinite(result)) {
+            return interaction.reply({ content: '❌ Invalid mathematical calculation result.', ephemeral: true });
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(PASTEL_BLUE)
+            .setDescription(`\` input \` : ${exprInput}\n\` result \` : **${result.toLocaleString()}**`)
+            .setFooter({ text: getGMT8Timestamp() });
+
+        await interaction.reply({ embeds: [embed] });
+    } catch (err) {
+        await interaction.reply({ content: '❌ Failed to calculate expression. Please check your format (e.g., `1.5k + 500`).', ephemeral: true });
+    }
+}
+
 async function handleIncentivesModal(interaction) {
     const itemBought = interaction.fields.getTextInputValue('item_bought');
     const pricePaid = interaction.fields.getTextInputValue('price_paid');
@@ -485,25 +488,31 @@ async function handleIncentivesModal(interaction) {
 
     const embedDescription = 
 `_ _
-            \` 、 \`     **reseller   points**     
-~~                                                             ~~
+            \` 、 \`     **reseller   points**    
+~~                                                                      ~~
 ⌒⌒    ${interaction.user}    <:hearty:1554781762813558804> ${itemBought}
 ⌒⌒    ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
-<:zz_blueheart3:1555584821529546752>    \` current pts \`     ꐚ     __**${newTotalPoints}**__
-~~                                                             ~~`;
+<:zz_blueheart3:1555584821529546752>   \` current pts \`     ꐚ     __**${newTotalPoints}**__
+~~                                                                      ~~`;
 
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
         .setDescription(embedDescription)
         .setFooter({ text: getGMT8Timestamp() });
 
+    // Send copy to primary target channel
     const targetChannel = await interaction.client.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
     if (targetChannel) {
         await targetChannel.send({ embeds: [embed] });
-        await interaction.reply({ content: `Incentives logged successfully in <#${TARGET_CHANNEL_ID}>!`, ephemeral: true });
-    } else {
-        await interaction.reply({ content: `Submitted successfully, but target channel <#${TARGET_CHANNEL_ID}> was not found.`, ephemeral: true });
     }
+
+    // Send copy to private log channel
+    const logChannel = await interaction.client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (logChannel) {
+        await logChannel.send({ embeds: [embed] });
+    }
+
+    await interaction.reply({ content: `Incentives logged successfully in <#${TARGET_CHANNEL_ID}>!`, ephemeral: true });
 }
 
 // -------------------------------------------------------------
@@ -516,8 +525,6 @@ client.on('interactionCreate', async (interaction) => {
                 return handleSayCommand(interaction);
             case 'reset-points':
                 return handleResetPointsCommand(interaction);
-            case 'edit-points':
-                return handleEditPointsCommand(interaction);
             case 'incentives':
                 return handleIncentivesCommand(interaction);
             case 'track-points':
@@ -526,6 +533,8 @@ client.on('interactionCreate', async (interaction) => {
                 return handlePointsRankCommand(interaction);
             case 'status':
                 return handleStatusCommand(interaction);
+            case 'calcu':
+                return handleCalcuCommand(interaction);
         }
     }
 
