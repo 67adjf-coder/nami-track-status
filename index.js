@@ -10,7 +10,8 @@ const {
     TextInputStyle, 
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    ActivityType
 } = require('discord.js');
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const cron = require('node-cron');
@@ -309,6 +310,23 @@ const commands = [
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
+    
+    // Rotating status setup
+    const statuses = [
+        'vouch within 12 hours!',
+        'reɑd server rules ɑt ɑll times',
+        'mɑke reɑding ɑ hɑbit'
+    ];
+    let currentIndex = 0;
+
+    setInterval(() => {
+        client.user.setPresence({
+            activities: [{ name: statuses[currentIndex], type: ActivityType.Watching }],
+            status: 'online',
+        });
+        currentIndex = (currentIndex + 1) % statuses.length;
+    }, 10000); // Rotates every 10 seconds
+
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
