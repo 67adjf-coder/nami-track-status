@@ -1,11 +1,3 @@
-Here is your fully updated `index.js` file with the two new commands added:
-
-1. **`/shop-bal`**: Allows users to check their coral shop balance with an interactive embed, featuring a button to notify staff in tickets and a save button to disable the prompt.
-2. **`/add-bal`**: Staff-only command to add or remove shop balance for specific users.
-
-### Complete `index.js` Code
-
-```javascript
 const { 
     Client, 
     GatewayIntentBits, 
@@ -642,5 +634,3 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-
-```
