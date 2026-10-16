@@ -1,3 +1,11 @@
+Here is your fully updated `index.js` file with the two new commands added:
+
+1. **`/shop-bal`**: Allows users to check their coral shop balance with an interactive embed, featuring a button to notify staff in tickets and a save button to disable the prompt.
+2. **`/add-bal`**: Staff-only command to add or remove shop balance for specific users.
+
+### Complete `index.js` Code
+
+```javascript
 const { 
     Client, 
     GatewayIntentBits, 
@@ -8,7 +16,9 @@ const {
     ModalBuilder, 
     TextInputBuilder, 
     TextInputStyle, 
-    ActionRowBuilder 
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle
 } = require('discord.js');
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const cron = require('node-cron');
@@ -47,9 +57,10 @@ const mongoClient = new MongoClient(uri || '', {
 
 let dbInstance = null;
 let pointsCollection = null;
+let shopBalCollection = null;
 
-async function getCollection() {
-    if (pointsCollection) return pointsCollection;
+async function getCollections() {
+    if (pointsCollection && shopBalCollection) return { pointsCollection, shopBalCollection };
     try {
         if (!dbInstance) {
             await mongoClient.connect();
@@ -57,25 +68,26 @@ async function getCollection() {
             console.log('Connected successfully to MongoDB Atlas!');
         }
         pointsCollection = dbInstance.collection('user_points');
-        return pointsCollection;
+        shopBalCollection = dbInstance.collection('shop_balance');
+        return { pointsCollection, shopBalCollection };
     } catch (err) {
         console.error('MongoDB connection error:', err);
         throw new Error('Database not connected');
     }
 }
 
-// Database Helper Functions with automatic connection waiting
+// Database Helper Functions for Points
 async function getUserPoints(userId) {
-    const col = await getCollection();
-    const user = await col.findOne({ user_id: userId });
+    const { pointsCollection } = await getCollections();
+    const user = await pointsCollection.findOne({ user_id: userId });
     return user ? user.points : 0;
 }
 
 async function addPoints(userId, amount) {
-    const col = await getCollection();
+    const { pointsCollection } = await getCollections();
     const current = await getUserPoints(userId);
     const newTotal = current + amount;
-    await col.updateOne(
+    await pointsCollection.updateOne(
         { user_id: userId },
         { $set: { points: newTotal } },
         { upsert: true }
@@ -84,21 +96,40 @@ async function addPoints(userId, amount) {
 }
 
 async function resetUserPoints(userId) {
-    const col = await getCollection();
-    await col.deleteOne({ user_id: userId });
+    const { pointsCollection } = await getCollections();
+    await pointsCollection.deleteOne({ user_id: userId });
 }
 
 async function resetAllPoints() {
-    const col = await getCollection();
-    await col.deleteMany({});
+    const { pointsCollection } = await getCollections();
+    await pointsCollection.deleteMany({});
 }
 
 async function getTopPoints(limit = 10) {
-    const col = await getCollection();
-    return await col.find({})
+    const { pointsCollection } = await getCollections();
+    return await pointsCollection.find({})
         .sort({ points: -1 })
         .limit(limit)
         .toArray();
+}
+
+// Database Helper Functions for Shop Balance
+async function getShopBalance(userId) {
+    const { shopBalCollection } = await getCollections();
+    const user = await shopBalCollection.findOne({ user_id: userId });
+    return user ? user.balance : 0;
+}
+
+async function updateShopBalance(userId, amount) {
+    const { shopBalCollection } = await getCollections();
+    const current = await getShopBalance(userId);
+    const newTotal = Math.max(0, current + amount); // Prevent negative balance
+    await shopBalCollection.updateOne(
+        { user_id: userId },
+        { $set: { balance: newTotal } },
+        { upsert: true }
+    );
+    return newTotal;
 }
 
 // -------------------------------------------------------------
@@ -137,16 +168,18 @@ function calculatePoints(priceText, vouchLinkText) {
     const hasVouch = vouchLinkText && vouchLinkText.trim().length > 0 && vouchLinkText.trim().toLowerCase() !== 'none';
     const totalAdded = basePoints + (hasVouch ? 1 : 0);
 
-    return { totalAdded, hasVouch };
+    return { totalAdded, hasVouch, basePoints };
 }
 
 // Monthly auto-reset on the 1st day of every month at midnight GMT+8 with history backup
 cron.schedule('0 0 1 * *', async () => {
     console.log('Resetting all points for the new month...');
     try {
-        const topUsers = await getTopPoints(50);
+        const topUsers = await getTopPoints(10);
+        const rankNumbers = ['❶', '❷', '❸', '❹', '❺', '❻', '❼', '❽', '❾', '❿'];
+        
         let summaryText = topUsers.length > 0 
-            ? topUsers.map((r, i) => `\` #${i + 1} \` <@${r.user_id}> — **${r.points} pts**`).join('\n')
+            ? topUsers.map((r, i) => `${rankNumbers[i] || `#${i+1}`} <@${r.user_id}> **wιth:** ${r.points}`).join('\n')
             : 'No points recorded this month.';
 
         const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
@@ -256,11 +289,28 @@ const commands = [
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
-        .setName('calcu')
-        .setDescription('Calculate numbers with support for k (thousand) and m (million)')
+        .setName('shop-bal')
+        .setDescription('Check your shop balance'),
+    new SlashCommandBuilder()
+        .setName('add-bal')
+        .setDescription('Add or remove shop balance from a user (Staff Only)')
+        .addUserOption(option =>
+            option.setName('buyer')
+                .setDescription('The user to update shop balance for')
+                .setRequired(true)
+        )
         .addStringOption(option =>
-            option.setName('expression')
-                .setDescription('Enter math expression (e.g., 1.5k + 500 or 10m / 4)')
+            option.setName('bal')
+                .setDescription('Choose whether to add or remove balance')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'Add', value: 'add' },
+                    { name: 'Remove', value: 'remove' }
+                )
+        )
+        .addNumberOption(option =>
+            option.setName('amount')
+                .setDescription('The amount to add or remove')
                 .setRequired(true)
         )
 ].map(cmd => cmd.toJSON());
@@ -417,16 +467,20 @@ async function handlePointsRankCommand(interaction) {
         });
     }
 
+    const rankNumbers = ['❶', '❷', '❸', '❹', '❺', '❻', '❼', '❽', '❾', '❿'];
+
     const formattedRanks = topUsers.map((row, index) => {
-        const rankNum = index + 1;
-        return `\` ⌗ ${rankNum} \`  : <@${row.user_id}>\n-# <:dd_03:1556525798972981298>  with ${row.points} pts`;
-    }).join('\n\n');
+        const rankSymbol = rankNumbers[index] || `__${index + 1}__`;
+        return `    ${rankSymbol}    <@${row.user_id}>    **wιth:**    ${row.points}`;
+    }).join('\n');
 
     const description = 
 `_ _
-> <:links:1555857271446310923>   \` incentives rank \`  
+        <:links:1555857271446310923>    rs points monthly rɑnking
+-# _ _                                    rɑce with the wɑves . . .
 
-${formattedRanks}`;
+${formattedRanks}
+_ _`;
 
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
@@ -444,34 +498,53 @@ async function handleStatusCommand(interaction) {
     await interaction.channel.send({ content: selectedLayout });
 }
 
-async function handleCalcuCommand(interaction) {
-    const exprInput = interaction.options.getString('expression');
+async function handleShopBalCommand(interaction) {
+    const balance = await getShopBalance(interaction.user.id);
 
-    try {
-        const parsedExpr = exprInput.replace(/(\d+(?:\.\d+)?)\s*([km])/gi, (match, num, suffix) => {
-            const multiplier = suffix.toLowerCase() === 'k' ? 1000 : 1000000;
-            return parseFloat(num) * multiplier;
-        });
+    const description = 
+`_ _
+            ℓoved, ${interaction.user} <:zz_blueheart3:1555584821529546752> 
+-# hɑs ɑ totɑl ɑmount of: \` ₱ ${balance.toLocaleString()} \`
+-# corɑls. use this to purchɑse items !
+_ _`;
 
-        if (!/^[\d\+\-\*\/\.\(\)\s]+$/.test(parsedExpr)) {
-            return interaction.reply({ content: '❌ Invalid expression! Only use numbers, basic math operators (+, -, *, /), and k/m.', ephemeral: true });
-        }
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(description)
+        .setFooter({ text: getGMT8Timestamp() });
 
-        const result = Function('"use strict";return (' + parsedExpr + ')')();
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('use_corals')
+            .setLabel('use your corɑls?')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('save_reefs')
+            .setLabel('nope. sɑve the reefs!')
+            .setStyle(ButtonStyle.Secondary)
+    );
 
-        if (isNaN(result) || !isFinite(result)) {
-            return interaction.reply({ content: '❌ Invalid mathematical calculation result.', ephemeral: true });
-        }
+    await interaction.reply({ embeds: [embed], components: [row] });
+}
 
-        const embed = new EmbedBuilder()
-            .setColor(PASTEL_BLUE)
-            .setDescription(`\` input \` : ${exprInput}\n\` result \` : **${result.toLocaleString()}**`)
-            .setFooter({ text: getGMT8Timestamp() });
-
-        await interaction.reply({ embeds: [embed] });
-    } catch (err) {
-        await interaction.reply({ content: '❌ Failed to calculate expression. Please check your format (e.g., `1.5k + 500`).', ephemeral: true });
+async function handleAddBalCommand(interaction) {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
+        return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
     }
+
+    const targetUser = interaction.options.getUser('buyer');
+    const actionType = interaction.options.getString('bal'); // 'add' or 'remove'
+    const amount = interaction.options.getNumber('amount');
+
+    const modifier = actionType === 'add' ? amount : -amount;
+    const newBalance = await updateShopBalance(targetUser.id, modifier);
+
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(`\` success \` : Successfully ${actionType === 'add' ? 'added' : 'removed'} ₱${amount.toLocaleString()} ${actionType === 'add' ? 'to' : 'from'} ${targetUser}.\n\` new balance \` : **₱ ${newBalance.toLocaleString()}**`)
+        .setFooter({ text: getGMT8Timestamp() });
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 async function handleIncentivesModal(interaction) {
@@ -484,16 +557,16 @@ async function handleIncentivesModal(interaction) {
 
     const vouchFormatted = (hasVouch && vouchLink.startsWith('http')) 
         ? `[vouched](${vouchLink})` 
-        : (hasVouch ? `[valid vouched](${vouchLink})` : 'none');
+        : (hasVouch ? `[vouched](${vouchLink})` : 'vouched');
 
     const embedDescription = 
 `_ _
-            \` 、 \`     **reseller   points**    
-~~                                                                      ~~
-⌒⌒    ${interaction.user}    <:hearty:1554781762813558804> ${itemBought}
-⌒⌒    ${pricePaid}  <:hearty:1554781762813558804> ${vouchFormatted}
-<:zz_blueheart3:1555584821529546752>   \` current pts \`     ꐚ     __**${newTotalPoints}**__
-~~                                                                      ~~`;
+  ⤹   ⸝⸝   ˚  rs ιncentιves   ✦
+
+-# _ _    𓂅    ${interaction.user}    **bought:**    ${itemBought}
+-# _ _  𓂅     ${pricePaid}    <:zz_blueheart3:1555584821529546752>     ${vouchFormatted}
+>    <:locket:1560692689513746487>    __points__ logged : \` ${totalAdded} \`
+_ _`;
 
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
@@ -533,8 +606,31 @@ client.on('interactionCreate', async (interaction) => {
                 return handlePointsRankCommand(interaction);
             case 'status':
                 return handleStatusCommand(interaction);
-            case 'calcu':
-                return handleCalcuCommand(interaction);
+            case 'shop-bal':
+                return handleShopBalCommand(interaction);
+            case 'add-bal':
+                return handleAddBalCommand(interaction);
+        }
+    }
+
+    if (interaction.isButton()) {
+        if (interaction.customId === 'use_corals') {
+            return interaction.reply({ content: 'ping stɑffs in your ticket to use your bɑlɑnce !', ephemeral: true });
+        }
+        if (interaction.customId === 'save_reefs') {
+            const disabledRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('use_corals')
+                    .setLabel('use your corɑls?')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(true),
+                new ButtonBuilder()
+                    .setCustomId('save_reefs')
+                    .setLabel('nope. sɑve the reefs!')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(true)
+            );
+            return interaction.update({ components: [disabledRow] });
         }
     }
 
@@ -546,3 +642,5 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
+```
